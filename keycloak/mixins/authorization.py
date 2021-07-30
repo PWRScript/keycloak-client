@@ -3,11 +3,11 @@ import logging
 from dataclasses import asdict
 from typing import Dict, List, Tuple
 
-import requests
+import aiohttp, requests
 
 from ..config import config
 from ..constants import GrantTypes, Logger, TokenType, TokenTypeHints
-from ..utils import auth_header, basic_auth, handle_exceptions
+from ..utils import auth_header, basic_auth, handle_exceptions, init_aiohttp
 
 log = logging.getLogger(Logger.name)
 
@@ -120,7 +120,7 @@ class AuthorizationMixin:
         see `docs <https://www.keycloak.org/docs/latest/authorization_services/#_service_rpt_overview>`__ for more details
 
         >>>
-        >>> form keycloak import Client
+        >>> from keycloak import Client
         >>> kc = Client(username='myuser', password='*****')
         >>> kc.rpt(kc.access_token)
         2020-08-03 11:47:54,568 [DEBUG] Retrieving RPT from keycloak
@@ -155,7 +155,7 @@ class AuthorizationMixin:
         see `docs <https://www.keycloak.org/docs/latest/authorization_services/#_service_protection_token_introspection>`__ for more details
 
         >>>
-         >>> form keycloak import Client
+         >>> from keycloak import Client
         >>> kc = Client(username='myuser', password='*****')
         >>> rpt = kc.rpt(kc.access_token)
         >>> kc.introspect(rpt['access_token'])
@@ -177,3 +177,116 @@ class AuthorizationMixin:
         response.raise_for_status()
         log.debug("RPT introspected successfully")
         return response.json()
+
+    @staticmethod
+    @handle_exceptions
+    async def async_pat(username: str = None, password: str = None) -> Dict:
+        """
+        retrieve protection api token (PAT), async
+        see `docs <https://www.keycloak.org/docs/latest/authorization_services/#_service_protection_whatis_obtain_pat>`__ for more details
+
+
+
+        :param username: username to be used
+        :param password: password to be used
+
+        :returns: dictionary
+        """
+        headers = basic_auth(config.client.client_id, config.client.client_secret)
+        payload = (
+                AuthorizationMixin.payload_for_user(username, password)
+                or AuthorizationMixin.payload_for_client()
+        )
+        log.debug("Retrieving PAT from server")
+        async with aiohttp.ClientSession() as session:
+            response = await session.post(
+                config.uma2.token_endpoint, data=payload, headers=headers
+            )
+            response.raise_for_status()
+            reps = await response.json()
+            await session.close()
+        return reps
+
+    @handle_exceptions
+    async def async_ticket(self, resources: List = [], access_token: str = None) -> Dict:
+        """
+        retrieve permission ticket from keycloak server async
+        see `docs <https://www.keycloak.org/docs/latest/authorization_services/#_overview_terminology_permission_ticket>`__ for more details
+
+
+
+        :param resources: list of resources
+        :param access_token: access token to be used
+
+        :returns: dictionary
+        """
+        await init_aiohttp(self)
+        access_token = access_token or self.access_token  # type: ignore
+        resources = resources or self.resources  # type: ignore
+        headers = auth_header(access_token, TokenType.bearer)
+        payload = [
+            {"resource_id": x["_id"], "resource_scopes": x["resource_scopes"]}
+            for x in resources
+        ]
+        log.debug("Retrieving permission ticket from keycloak")
+        response = await self.aio_client.post(
+            config.uma2.permission_endpoint, json=payload, headers=headers
+        )
+        response.raise_for_status()
+        log.debug("Permission ticket retrieved successfully")
+        return await response.json()
+
+    @handle_exceptions
+    async def async_rpt(self, access_token: str) -> Dict:
+        """
+        retrieve request party token (RPT) async
+        see `docs <https://www.keycloak.org/docs/latest/authorization_services/#_service_rpt_overview>`__ for more details
+
+
+
+
+        :param access_token: access token to be used
+
+        :returns: dictionary
+        """
+        await init_aiohttp(self)
+        payload = {
+            "grant_type": GrantTypes.uma_ticket,
+            "audience": config.client.client_id,
+        }
+        headers = auth_header(access_token, TokenType.bearer)
+        log.debug("Retrieving RPT from keycloak")
+        response = await self.aio_client.post(
+            config.uma2.token_endpoint, data=payload, headers=headers
+        )
+        response.raise_for_status()
+        log.debug("RPT retrieved successfully")
+        return await response.json()
+
+    @staticmethod
+    @handle_exceptions
+    async def async_introspect(rpt: str) -> Dict:
+        """
+        introspect the request party token (RPT) async
+        see `docs <https://www.keycloak.org/docs/latest/authorization_services/#_service_protection_token_introspection>`__ for more details
+
+
+
+        :param rpt: rpt token
+
+        :returns: dictionary
+        """
+        payload = {"token_type_hint": TokenTypeHints.rpt, "token": rpt}
+        headers = basic_auth(config.client.client_id, config.client.client_secret)
+        log.debug("Introspecting RPT token")
+
+        async with aiohttp.ClientSession() as session:
+            response = await session.post(
+                config.uma2.introspection_endpoint, data=payload, headers=headers
+            )
+            response.raise_for_status()
+            log.debug("RPT introspected successfully")
+            dta = await response.json()
+            await session.close()
+        return dta
+

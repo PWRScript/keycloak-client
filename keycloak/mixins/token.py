@@ -8,7 +8,7 @@ from jose import jwt
 
 from ..config import OpenId, config
 from ..constants import Logger
-from ..utils import basic_auth, handle_exceptions
+from ..utils import basic_auth, handle_exceptions, init_aiohttp
 
 log = logging.getLogger(Logger.name)
 
@@ -162,3 +162,41 @@ class TokenMixin:
             issuer=config.openid.issuer,
             audience=config.client.client_id,
         )
+
+    @handle_exceptions
+    async def async_refresh_tokens(self) -> None:
+        """
+        async method to refresh expired access token using refresh token
+
+        """
+        await init_aiohttp(self)
+        headers = basic_auth(config.client.client_id, config.client.client_secret)
+        payload = {
+            "client_id": config.client.client_id,
+            "grant_type": "refresh_token",
+            "refresh_token": self._tokens["refresh_token"],
+        }
+        log.debug("Refreshing tokens")
+        response = await self.aio_client.post(
+            config.uma2.token_endpoint, data=payload, headers=headers
+        )
+        response.raise_for_status()
+        log.debug("Tokens refreshed successfully")
+        self._tokens = await response.json()
+
+    @cached_property
+    async def async_jwks(self) -> List:
+        """
+        async list of signing keys/JWKs used by the keycloak server
+
+
+
+        :returns: list
+        """
+        await init_aiohttp(self)
+        log.debug("Fectching JWK keys")
+        response = await self.aio_client.get(self.openid.jwks_uri)
+        response.raise_for_status()
+        data = await response.json()
+        return data["keys"]
+

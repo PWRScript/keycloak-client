@@ -7,7 +7,7 @@ import requests
 
 from ..config import config
 from ..constants import Logger
-from ..utils import auth_header, handle_exceptions
+from ..utils import auth_header, handle_exceptions, init_aiohttp
 
 log = logging.getLogger(Logger.name)
 
@@ -80,3 +80,54 @@ class ResourceMixin:
         response.raise_for_status()
         log.debug("Resource retrieved successfully")
         return response.json()
+
+    @property
+    async def async_resources(self) -> List:
+        """
+        list of resources available in keycloak server
+
+        :returns: list
+        """
+        await init_aiohttp(self)
+        if not self._resources:
+            self._resources = await self.async_find_resources()
+        return self._resources
+
+    @handle_exceptions
+    async def async_find_resources(self, access_token: str = None) -> Dict:
+        """
+        fetch resources from keycloak server
+
+
+
+        :param access_token: access token to be used
+        :returns: list
+        """
+        await init_aiohttp(self)
+        access_token = access_token or self.access_token  # type: ignore
+        headers = auth_header(access_token)
+        log.debug("Retrieving resources from keycloak")
+        response = await self.aio_client.get(config.uma2.resource_endpoint, headers=headers)
+        response.raise_for_status()
+        log.debug("Resources retrieved successfully")
+        return [(await self.async_find_resource(x)) for x in (await response.json())]  # type: ignore
+
+    @handle_exceptions
+    async def async_find_resource(self, resource_id: str, access_token: str = None) -> Dict:
+        """
+        Method to fetch the details of a resource
+
+
+
+        :param access_token: access token to be used
+        :returns: list
+        """
+        await init_aiohttp(self)
+        access_token = access_token or self.access_token  # type: ignore
+        headers = auth_header(access_token)
+        endpoint = f"{config.uma2.resource_endpoint}/{resource_id}"
+        log.debug("Retrieving resource from keycloak")
+        response = await self.aio_client.get(endpoint, headers=headers)
+        response.raise_for_status()
+        log.debug("Resource retrieved successfully")
+        return await response.json()

@@ -8,7 +8,7 @@ import requests
 
 from ..config import config
 from ..constants import GrantTypes, Logger, ResponseTypes
-from ..utils import auth_header, handle_exceptions
+from ..utils import auth_header, handle_exceptions, init_aiohttp
 
 log = logging.getLogger(Logger.name)
 
@@ -32,11 +32,11 @@ class AuthenticationMixin:
         >>>
         >>> app = Flask(__name__)
         >>>
-        >>> @app.route("/howdy)
+        >>> @app.route("/howdy")
         >>> def howdy():
         >>>     return "Howdy!"
         >>>
-        >>> @app.route("/login)
+        >>> @app.route("/login")
         >>> def login():
         >>>     url, state = kc.login()
         >>>     session["state"] = state
@@ -73,17 +73,17 @@ class AuthenticationMixin:
         >>>
         >>> app = Flask(__name__)
         >>>
-        >>> @app.route("/howdy)
+        >>> @app.route("/howdy")
         >>> def howdy():
         >>>     return "Howdy!"
         >>>
-        >>> @app.route("/login)
+        >>> @app.route("/login")
         >>> def login():
         >>>     url, state = kc.login()
         >>>     session["state"] = state
         >>>     return redirect(url)
         >>>
-        >>> @app.route("/callback)
+        >>> @app.route("/callback")
         >>> def callback():
         >>>     state = request.params["state"]
         >>>     if session["state"] != state:
@@ -113,6 +113,58 @@ class AuthenticationMixin:
         return response.json()
 
     @handle_exceptions
+    async def async_callback(self, code: str) -> Dict:
+        """
+        async openid login callback handler
+
+        >>> from keycloak import Client
+        >>> from quart import Quart, request, session, redirect, Response
+        >>>
+        >>> kc = Client()
+        >>>
+        >>> app = Quart(__name__)
+        >>>
+        >>> @app.route("/howdy")
+        >>> async def howdy():
+        >>>     return "Howdy!"
+        >>>
+        >>> @app.route("/login")
+        >>> async def login():
+        >>>     url, state = kc.login()
+        >>>     session["state"] = state
+        >>>     return redirect(url)
+        >>>
+        >>> @app.route("/callback")
+        >>> async def callback():
+        >>>     state = request.params["state"]
+        >>>     if session["state"] != state:
+        >>>         return Response("Invalid state", status=400)
+        >>>
+        >>>     code = request.params["code"]
+        >>>     session["tokens"] = await kc.async_callback(code)
+        >>>     return redirect("/howdy")
+        >>>
+        >>> if __name__ == "__main__":
+        >>>     app.run()
+
+        :param code: code send by the keycloak server
+        :returns: dictionary
+        """
+        await init_aiohttp(self)
+        payload = {
+            "code": code,
+            "grant_type": GrantTypes.authorization_code,
+            "redirect_uri": self.callback_uri,
+            "client_id": config.client.client_id,
+            "client_secret": config.client.client_secret,
+        }
+        log.debug("Retrieving user tokens from server")
+        response = await self.aio_client.post(config.openid.token_endpoint, data=payload)
+        response.raise_for_status()
+        log.debug("User tokens retrieved successfully")
+        return await response.json()
+
+    @handle_exceptions
     def fetch_userinfo(self, access_token: str = None) -> Dict:
         """
         method to retrieve userinfo from the keycloak server
@@ -135,6 +187,23 @@ class AuthenticationMixin:
         log.debug("User info retrieved successfully")
         return response.json()
 
+    @handle_exceptions
+    async def async_fetch_userinfo(self, access_token: str = None) -> Dict:
+        """
+        method to retrieve userinfo from the keycloak server
+
+        :param access_token: access token of the client or user
+        :returns: dictionary
+        """
+        await init_aiohttp(self)
+        access_token = access_token or self.access_token  # type: ignore
+        headers = auth_header(access_token)
+        log.debug("Retrieving user info from server")
+        response = await self.aio_client.post(config.openid.userinfo_endpoint, headers=headers)
+        response.raise_for_status()
+        log.debug("User info retrieved successfully")
+        return await response.json()
+
     @property
     def userinfo(self) -> Dict:
         """
@@ -153,6 +222,18 @@ class AuthenticationMixin:
             self._userinfo = self.fetch_userinfo()
         return self._userinfo
 
+    @property
+    async def async_userinfo(self) -> Dict:
+        """
+        user information available within the server
+
+        :returns: dictionary
+        """
+        await init_aiohttp(self)
+        if not self._userinfo:
+            self._userinfo = await self.async_fetch_userinfo()
+        return self._userinfo
+
     def logout(self, access_token: str = None, refresh_token: str = None) -> None:
         access_token = access_token or self.access_token  # type: ignore
         refresh_token = refresh_token or self.refresh_token  # type: ignore
@@ -164,6 +245,23 @@ class AuthenticationMixin:
         headers = auth_header(access_token)
         log.debug("Logging out user from server")
         response = requests.post(
+            config.openid.end_session_endpoint, data=payload, headers=headers
+        )
+        response.raise_for_status()
+        log.debug("User logged out successfully")
+
+    async def async_logout(self, access_token: str = None, refresh_token: str = None) -> None:
+        await init_aiohttp(self)
+        access_token = access_token or self.access_token  # type: ignore
+        refresh_token = refresh_token or self.refresh_token  # type: ignore
+        payload = {
+            "client_id": config.client.client_id,
+            "client_secret": config.client.client_secret,
+            "refresh_token": refresh_token,
+        }
+        headers = auth_header(access_token)
+        log.debug("Logging out user from server")
+        response = await self.aio_client.post(
             config.openid.end_session_endpoint, data=payload, headers=headers
         )
         response.raise_for_status()

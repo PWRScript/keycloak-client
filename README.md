@@ -13,8 +13,8 @@ Documentation is available in [https://keycloak-client.readthedocs.io](https://k
 ```
 pip install keycloak                       # install only client   
 pip install "keycloak[docs]"               # install client + sphinx   
-pip install "keycloak[extensions]"         # install client + django/flask/starlette   
-pip install "keycloak[docs,extensions]"    # install client + sphinx + django/flask/starlette   
+pip install "keycloak[extensions]"         # install client + django/flask/quart/starlette   
+pip install "keycloak[docs,extensions]"    # install client + sphinx + django/flask/quart/starlette   
 ```
 
 ### Web Framework Support
@@ -24,3 +24,4 @@ We provide prebuilt middlewares for the following frameworks
 * Flask
 * Starlette
 * Django
+* Quart

@@ -6,11 +6,21 @@ from functools import wraps
 from typing import Any, Callable, Dict, Tuple, Union
 
 from requests.exceptions import HTTPError
+from aiohttp import ClientSession
+from aiohttp.web import HTTPClientError
 
 from .constants import Headers, Logger, TokenType
 
 log = logging.getLogger(Logger.name)
 
+
+async def init_aiohttp(self):
+    """
+    method to init the aiohttp client session if already not created
+    in a kc client instance. It is necessary to async methods work
+    """
+    if not hasattr(self, "aio_client"):
+        self.aio_client = ClientSession()
 
 def b64encode(data: Any, serialize: bool = False) -> str:
     """method to encode string using base64"""
@@ -47,6 +57,10 @@ def handle_exceptions(func: Callable) -> Any:
         except HTTPError as ex:
             if hasattr(ex.response, "content"):
                 log.exception(ex.response.content)
+            raise ex
+        except HTTPClientError as ex:
+            if hasattr(ex, "text"):
+                log.exception(ex.text)
             raise ex
         except Exception as ex:
             log.exception("Error occurred:")

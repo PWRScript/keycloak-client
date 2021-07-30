@@ -14,6 +14,7 @@
    Flask <extensions/flask>
    Starlette <extensions/starlette>
    Django <extensions/django>
+   Quart <extensions/quart>
 
 .. toctree::
    :maxdepth: 2
